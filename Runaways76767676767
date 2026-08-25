@@ -1,0 +1,524 @@
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+
+-- Cool Custom Theme & Visual Overhaul
+WindUI:AddTheme({
+    Name = "JimHubNeon",
+    Accent = "#00FF7F", -- Spring green neon accent
+    Outline = "#1E1E2E",
+    Background = "#0D0D15",
+    Text = "#FFFFFF",
+    PlaceholderText = "#7F849C",
+})
+
+local Window = WindUI:CreateWindow({
+    Title = "JIM HUB // V2.5 + RUNAWAYS",
+    Author = "by milesthegreat & Jim",
+    Folder = "JimHubRunaways",
+    Icon = "shield",
+    Transparent = true,
+    Theme = "JimHubNeon",
+    SideBarWidth = 200,
+    HasOutline = true,
+    ToggleKey = Enum.KeyCode.K -- Keybind to open/close UI
+})
+
+-- Tabs
+local CombatTab = Window:Tab({ Title = "Combat & Aura", Icon = "sword" })
+local AimbotTab = Window:Tab({ Title = "Aimbot & ESP", Icon = "crosshair" })
+local VehicleTab = Window:Tab({ Title = "Vehicles", Icon = "car" })
+local LootTab = Window:Tab({ Title = "Auto Loot", Icon = "package" })
+local SettingsTab = Window:Tab({ Title = "Settings & Misc", Icon = "settings" })
+
+-- Globals & State Integration
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Variables from Jim Hub & Tora
+local ATTACK_RANGE = 25
+local DAMAGE_AMOUNT = 67676767
+local isRunning = false
+local autoBreakRunning = false
+local showVisualizer = false
+local vehicleModActiveState = false
+local autoLootActive = false
+local lootAllMode = true
+
+local killAuraEnabled = false
+local killAuraRange = 50
+local killAuraDamage = 100
+local ammoAmount = 999
+
+getgenv().AimbotEnabled = false
+getgenv().EspNPCsEnabled = false
+getgenv().EspLootEnabled = false
+getgenv().AimPart = "HumanoidRootPart"
+getgenv().ShowFov = false
+getgenv().FovRadius = 150
+
+local targets = { NPCs = {}, Safes = {} }
+local espObjects = {}
+local selectedLootItems = {}
+
+local remoteEvent = nil
+local remoteFunction = nil
+
+task.spawn(function()
+    pcall(function()
+        remoteFunction = ReplicatedStorage:WaitForChild("Function", 5)
+        remoteEvent = ReplicatedStorage:WaitForChild("Event", 5)
+        if not remoteEvent then
+            remoteEvent = ReplicatedStorage:FindFirstChild("FlowClient")
+            if remoteEvent then remoteEvent = remoteEvent:FindFirstChild("ClientRunner") end
+            if remoteEvent then remoteEvent = remoteEvent:FindFirstChild("Event") end
+        end
+    end)
+end)
+
+local function handleRemoteEvent()
+    if remoteEvent and remoteEvent.Parent then return remoteEvent end
+    pcall(function()
+        for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
+            if descendant.Name == "Event" and (descendant:IsA("RemoteEvent") or descendant:IsA("UnreliableRemoteEvent")) then
+                remoteEvent = descendant
+                return remoteEvent
+            end
+        end
+    end)
+    return remoteEvent
+end
+
+-- Range Visualizer Ring
+local rangeRing = Instance.new("Part")
+rangeRing.Name = "AutoAttackRangeRing"
+rangeRing.Shape = Enum.PartType.Cylinder
+rangeRing.Anchored = true
+rangeRing.CanCollide = false
+rangeRing.Transparency = 1
+rangeRing.BrickColor = BrickColor.new("Bright red")
+rangeRing.Material = Enum.Material.Neon
+rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
+rangeRing.Parent = workspace
+
+-- Combat Tab
+CombatTab:Section({ Title = "Combat Features" })
+
+CombatTab:Toggle({
+    Title = "Auto Attack (Jim Hub)",
+    Default = false,
+    Callback = function(state)
+        isRunning = state
+    end
+})
+
+CombatTab:Toggle({
+    Title = "Auto Break Multi-Hit",
+    Default = false,
+    Callback = function(state)
+        autoBreakRunning = state
+    end
+})
+
+CombatTab:Toggle({
+    Title = "Kill Aura (Tora)",
+    Default = false,
+    Callback = function(state)
+        killAuraEnabled = state
+        if killAuraEnabled then
+            task.spawn(function()
+                while killAuraEnabled do
+                    local char = player.Character
+                    local root = char and char:FindFirstChild("HumanoidRootPart")
+                    local remote = handleRemoteEvent()
+                    if root and remote then
+                        local npcFolder = workspace:FindFirstChild("NPCs")
+                        if npcFolder then
+                            for _, npc in ipairs(npcFolder:GetChildren()) do
+                                local hum = npc:FindFirstChildOfClass("Humanoid")
+                                local hrp = npc:FindFirstChild("HumanoidRootPart")
+                                if hum and hrp and hum.Health > 0 and (hrp.Position - root.Position).Magnitude <= killAuraRange then
+                                    pcall(function() remote:FireServer("NPCs", "Damage", hum, killAuraDamage) end)
+                                end
+                            end
+                        end
+                    end
+                    task.wait(0.2)
+                end
+            end)
+        end
+    end
+})
+
+CombatTab:Input({
+    Title = "Attack / Aura Range",
+    Value = tostring(ATTACK_RANGE),
+    Callback = function(val)
+        local num = tonumber(val)
+        if num then 
+            ATTACK_RANGE = num 
+            killAuraRange = num
+        end
+    end
+})
+
+CombatTab:Toggle({
+    Title = "Show Range Ring Visualizer",
+    Default = false,
+    Callback = function(state)
+        showVisualizer = state
+    end
+})
+
+CombatTab:Input({
+    Title = "Ammo Amount",
+    Value = tostring(ammoAmount),
+    Callback = function(val)
+        local num = tonumber(val)
+        if num then ammoAmount = num end
+    end
+})
+
+CombatTab:Button({
+    Title = "Apply Infinite/Custom Ammo",
+    Callback = function()
+        local remote = handleRemoteEvent()
+        if not remote then return end
+        local containers = {player.Backpack, player.Character}
+        for _, container in ipairs(containers) do
+            if container then
+                for _, item in ipairs(container:GetChildren()) do
+                    if item:IsA("Tool") then
+                        pcall(function() remote:FireServer("Ammo", "setAmmo", item, ammoAmount) end)
+                    end
+                end
+            end
+        end
+    end
+})
+
+-- Aimbot & ESP Tab
+AimbotTab:Section({ Title = "Targeting & Visuals" })
+
+AimbotTab:Toggle({
+    Title = "Silent Aim",
+    Default = false,
+    Callback = function(state)
+        getgenv().AimbotEnabled = state
+    end
+})
+
+AimbotTab:Dropdown({
+    Title = "Aim Part",
+    Values = {"HumanoidRootPart", "Head"},
+    Default = "HumanoidRootPart",
+    Callback = function(val)
+        getgenv().AimPart = val
+    end
+})
+
+AimbotTab:Toggle({
+    Title = "Show FOV Circle",
+    Default = false,
+    Callback = function(state)
+        getgenv().ShowFov = state
+    end
+})
+
+AimbotTab:Slider({
+    Title = "FOV Size",
+    Min = 50,
+    Max = 300,
+    Default = 150,
+    Callback = function(val)
+        getgenv().FovRadius = val
+    end
+})
+
+AimbotTab:Toggle({
+    Title = "ESP NPCs",
+    Default = false,
+    Callback = function(state)
+        getgenv().EspNPCsEnabled = state
+    end
+})
+
+AimbotTab:Toggle({
+    Title = "ESP Loot & Safes",
+    Default = false,
+    Callback = function(state)
+        getgenv().EspLootEnabled = state
+    end
+})
+
+-- Vehicles Tab
+VehicleTab:Section({ Title = "Vehicle Customization" })
+
+VehicleTab:Toggle({
+    Title = "Vehicle Mods: ON/OFF",
+    Default = false,
+    Callback = function(state)
+        vehicleModActiveState = state
+    end
+})
+
+-- Gas Level Input Option
+local gasLevelValue = 100
+VehicleTab:Input({
+    Title = "gasLevel",
+    Value = tostring(gasLevelValue),
+    Callback = function(val)
+        local num = tonumber(val)
+        if num then gasLevelValue = num end
+    end
+})
+
+local defaultVehicleProperties = {
+    ["Acceleration"] = 95,
+    ["BrakingPower"] = 32000,
+    ["Downforce"] = 1500,
+    ["TopSpeedMPH"] = 300,
+    ["Torque"] = 30000
+}
+
+local vehicleInputs = {}
+for propName, defaultVal in pairs(defaultVehicleProperties) do
+    vehicleInputs[propName] = defaultVal
+    VehicleTab:Input({
+        Title = propName,
+        Value = tostring(defaultVal),
+        Callback = function(val)
+            local num = tonumber(val)
+            if num then vehicleInputs[propName] = num end
+        end
+    })
+end
+
+-- Auto Loot Tab
+LootTab:Section({ Title = "Loot Manager" })
+
+LootTab:Toggle({
+    Title = "Auto Looting",
+    Default = false,
+    Callback = function(state)
+        autoLootActive = state
+    end
+})
+
+LootTab:Toggle({
+    Title = "Loot All Mode",
+    Default = true,
+    Callback = function(state)
+        lootAllMode = state
+    end
+})
+
+LootTab:Button({
+    Title = "Drop All Unequipped Items",
+    Callback = function()
+        local backpack = player:FindFirstChild("Backpack")
+        if backpack and remoteEvent then
+            for _, bpItem in ipairs(backpack:GetChildren()) do
+                if not string.find(bpItem.Name, "Backpack") and not string.find(bpItem.Name, "Armor") then
+                    pcall(function() remoteEvent:FireServer("Loot", "LootUnequip", bpItem, false) end)
+                end
+            end
+        end
+    end
+})
+
+-- Settings & Misc Tab
+SettingsTab:Section({ Title = "Movement & Utilities" })
+
+local speedModActive = false
+local customCFrameSpeed = 24
+SettingsTab:Toggle({
+    Title = "CFrame Speed",
+    Default = false,
+    Callback = function(state)
+        speedModActive = state
+    end
+})
+
+SettingsTab:Input({
+    Title = "CFrame Speed Value",
+    Value = "24",
+    Callback = function(val)
+        local num = tonumber(val)
+        if num then customCFrameSpeed = num end
+    end
+})
+
+local customJumpPower = 50
+SettingsTab:Input({
+    Title = "JumpPower Value",
+    Value = "50",
+    Callback = function(val)
+        local num = tonumber(val)
+        if num then customJumpPower = num end
+    end
+})
+
+local noclipActive = false
+SettingsTab:Toggle({
+    Title = "Noclip",
+    Default = false,
+    Callback = function(state)
+        noclipActive = state
+    end
+})
+
+local infJumpActive = false
+SettingsTab:Toggle({
+    Title = "Infinite Jump",
+    Default = false,
+    Callback = function(state)
+        infJumpActive = state
+    end
+})
+
+UserInputService.JumpRequest:Connect(function()
+    if infJumpActive then
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end
+end)
+
+-- Background Loop Handler
+RunService.Heartbeat:Connect(function(dt)
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+
+    if hrp and hum then
+        if speedModActive then
+            hum.WalkSpeed = 16
+            local moveDir = hum.MoveDirection
+            if moveDir.Magnitude > 0 then
+                hrp.CFrame = hrp.CFrame + (moveDir * customCFrameSpeed * dt)
+            end
+        end
+        if customJumpPower then
+            pcall(function()
+                hum.JumpPower = customJumpPower
+                hum.UseJumpPower = true
+            end)
+        end
+    end
+
+    if noclipActive then
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = false end
+        end
+    end
+
+    if hrp and showVisualizer then
+        rangeRing.Transparency = 0.7
+        rangeRing.CFrame = CFrame.new(hrp.Position - Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.rad(90))
+        rangeRing.Size = Vector3.new(0.2, ATTACK_RANGE * 2, ATTACK_RANGE * 2)
+    else
+        rangeRing.Transparency = 1
+    end
+
+    -- Auto Attack Processing
+    if isRunning and hrp then
+        local npcsFolder = workspace:FindFirstChild("NPCs")
+        if npcsFolder then
+            for _, npcModel in ipairs(npcsFolder:GetChildren()) do
+                if npcModel:IsA("Model") then
+                    local npcHum = npcModel:FindFirstChildOfClass("Humanoid")
+                    local rootPart = npcModel:FindFirstChild("HumanoidRootPart") or npcModel:FindFirstChild("RootPart")
+                    if npcHum and rootPart and npcHum.Health > 0 then
+                        if (rootPart.Position - hrp.Position).Magnitude <= ATTACK_RANGE then
+                            pcall(function()
+                                local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
+                                if ev then
+                                    ev:FireServer("Punches", "ReplicateSound", hrp, "Swoosh")
+                                    ev:FireServer("NPCs", "Damage", npcHum, DAMAGE_AMOUNT)
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Auto Break Processing
+    if autoBreakRunning and hrp then
+        local mapFolder = workspace:FindFirstChild("Map")
+        if mapFolder then
+            local buildingsFolder = mapFolder:FindFirstChild("Buildings")
+            if buildingsFolder then
+                local validTargets = { ["ATM"] = true, ["CashRegister"] = true, ["Vault"] = true, ["Safe"] = true }
+                for _, obj in ipairs(buildingsFolder:GetDescendants()) do
+                    if obj:IsA("Model") and validTargets[obj.Name] then
+                        local targetPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+                        if targetPart and (targetPart.Position - hrp.Position).Magnitude <= ATTACK_RANGE then
+                            pcall(function()
+                                local ev = remoteEvent or ReplicatedStorage:FindFirstChild("Event")
+                                if ev then ev:FireServer("DamageToOpen", "Damage", obj, 1000, "melee") end
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Vehicle Modifications & Gas Loop Integration
+    if vehicleModActiveState then
+        local vehiclesFolder = workspace:FindFirstChild("Vehicles")
+        if vehiclesFolder then
+            for _, car in ipairs(vehiclesFolder:GetChildren()) do
+                local propFolder = car:FindFirstChild("VehicleProperty")
+                for propName, val in pairs(vehicleInputs) do
+                    pcall(function()
+                        if propFolder then
+                            propFolder:SetAttribute(propName, val)
+                            propFolder[propName] = val
+                        end
+                        car:SetAttribute(propName, val)
+                        car[propName] = val
+                    end)
+                end
+                
+                -- Apply gasLevel modification[cite: 3]
+                pcall(function()
+                    local gasObj = car:FindFirstChild("gasLevel")
+                    if gasObj then 
+                        gasObj.Value = gasLevelValue[cite: 3]
+                    end
+                end)
+            end
+        end
+    end
+
+    -- Auto Looting Loop
+    if autoLootActive and remoteFunction then
+        local lootFolder = workspace:FindFirstChild("Loot")
+        if lootFolder then
+            for _, lootItem in ipairs(lootFolder:GetChildren()) do
+                local targetHandle = lootItem:FindFirstChild("Handle") or lootItem:FindFirstChildWhichIsA("BasePart")
+                if targetHandle and (lootAllMode or selectedLootItems[lootItem.Name]) then
+                    pcall(function()
+                        remoteFunction:InvokeServer("Loot", "LootEquip", targetHandle)
+                    end)
+                end
+            end
+        end
+    end
+end)
+
+WindUI:Notify({
+    Title = "JIM HUB // Loaded",
+    Content = "Custom Neon theme applied! Press [K] to toggle the menu.",
+    Duration = 5
+})
