@@ -3,7 +3,7 @@ local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footag
 -- Cool Custom Theme & Visual Overhaul
 WindUI:AddTheme({
     Name = "JimHubNeon",
-    Accent = "#00FF7F", -- Spring green neon accent
+    Accent = "#00FF7F",
     Outline = "#1E1E2E",
     Background = "#0D0D15",
     Text = "#FFFFFF",
@@ -19,7 +19,7 @@ local Window = WindUI:CreateWindow({
     Theme = "JimHubNeon",
     SideBarWidth = 200,
     HasOutline = true,
-    ToggleKey = Enum.KeyCode.K -- Keybind to open/close UI
+    ToggleKey = Enum.KeyCode.K
 })
 
 -- Tabs
@@ -265,7 +265,6 @@ VehicleTab:Toggle({
     end
 })
 
--- Gas Level Input Option
 local gasLevelValue = 100
 VehicleTab:Input({
     Title = "gasLevel",
@@ -490,11 +489,11 @@ RunService.Heartbeat:Connect(function(dt)
                     end)
                 end
                 
-                -- Apply gasLevel modification[cite: 3]
+                -- Safe gasLevel Value Modification
                 pcall(function()
                     local gasObj = car:FindFirstChild("gasLevel")
                     if gasObj then 
-                        gasObj.Value = gasLevelValue[cite: 3]
+                        gasObj.Value = gasLevelValue 
                     end
                 end)
             end
